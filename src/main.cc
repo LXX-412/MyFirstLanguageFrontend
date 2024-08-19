@@ -96,10 +96,10 @@ public:
 
 class CallExprAST : public ExprAST {
   std::string Callee;
-  std::vector<ExprAST> Args;
+  std::vector<std::unique_ptr<ExprAST>> Args;
 
 public:
-  CallExprAST(std::string Callee, std::vector<ExprAST> Args)
+  CallExprAST(std::string Callee, std::vector<std::unique_ptr<ExprAST>> Args)
       : Callee(Callee), Args(std::move(Args)) {}
 };
 
@@ -124,6 +124,18 @@ public:
 };
 
 } // namespace 
+
+static int gettok();
+std::unique_ptr<ExprAST> LogError(const char *Str);
+static int getNextToken();
+std::unique_ptr<PrototypeAST> LogErrorP(const char *Str);
+static std::unique_ptr<ExprAST> ParseNumberExpr();
+static std::unique_ptr<ExprAST> ParseParenExpr(); 
+static std::unique_ptr<ExprAST> ParseIdentifierExpr();
+static std::unique_ptr<ExprAST> ParsePrimary();
+static int GetTokPrecedence();
+static std::unique_ptr<ExprAST> ParseExpression();
+static std::unique_ptr<ExprAST> ParseBinOpRHS();
 
 static int CurTok;
 static int getNextToken() {
@@ -222,6 +234,40 @@ static int GetTokPrecedence() {
   int TokPrec = BinopPrecedence[CurTok];
   if (TokPrec <= 0) return -1;
   return TokPrec;
+}
+
+/// binoprhs
+///   ::= ('+' primary)*
+static std::unique_ptr<ExprAST> ParseBinOpRHS(int ExprPrec,
+                                              std::unique_ptr<ExprAST> LHS) {
+  // If this is a binop, find its precedence.
+  while (true) {
+    int TokPrec = GetTokPrecedence();
+
+    // If this is a binop that binds at least as tightly as the current binop,
+    // consume it, otherwise we are done.
+    if (TokPrec < ExprPrec)
+      return LHS;
+
+    int BinOp = CurTok;
+    getNextToken(); /// eat binop
+
+    // Parse the primary expression after binary operator
+    auto RHS = ParsePrimary();
+    if (!RHS)
+      return nullptr;
+
+    // if Binop binds less tightly with RHS than the operator after RHS, let
+    // the pending operator take RHS as its LHS
+    int NextPrec = GetTokPrecedence();
+    if (TokPrec < NextPrec) {
+      RHS = ParseBinOpRHS(TokPrec + 1, std::move(RHS));
+      if (!RHS)
+        return nullptr;
+    }
+    // Merge LHS/RHS.
+    LHS = std::make_unique<BinaryExprAST>(BinOp, std::move(LHS), std::move(RHS));
+  }
 }
 
 /// expression 

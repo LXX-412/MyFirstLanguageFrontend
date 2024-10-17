@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cstdio>
 #include <ctype.h>
 #include <iostream>
@@ -77,6 +78,7 @@ public:
   NumberExprAST(double Val) : Val(Val) {}
 };
 
+/// VariableExprAST - Expression class for referencing a variable, like "a".
 class VariableExprAST : public ExprAST {
   std::string Name;
 
@@ -84,6 +86,7 @@ public:
   VariableExprAST(std::string &Name) : Name(Name) {}
 };
 
+/// BinaryExprAST - Expression class for a binary operator.
 class BinaryExprAST : public ExprAST {
   char Op;
   std::unique_ptr<ExprAST> LHS, RHS;
@@ -94,6 +97,7 @@ public:
       : Op(Op), LHS(std::move(LHS)), RHS(std::move(RHS)) {}
 };
 
+/// CallExprAST - Expression class for function calls.
 class CallExprAST : public ExprAST {
   std::string Callee;
   std::vector<std::unique_ptr<ExprAST>> Args;
@@ -135,7 +139,9 @@ static std::unique_ptr<ExprAST> ParseIdentifierExpr();
 static std::unique_ptr<ExprAST> ParsePrimary();
 static int GetTokPrecedence();
 static std::unique_ptr<ExprAST> ParseExpression();
-static std::unique_ptr<ExprAST> ParseBinOpRHS();
+static std::unique_ptr<ExprAST> ParseBinOpRHS(int ExprPrec, std::unique_ptr<ExprAST> LHS);
+static std::unique_ptr<FunctionAST> ParseDefineition();
+static std::unique_ptr<PrototypeAST> ParseExtern();
 
 static int CurTok;
 static int getNextToken() {
@@ -265,7 +271,7 @@ static std::unique_ptr<ExprAST> ParseBinOpRHS(int ExprPrec,
       if (!RHS)
         return nullptr;
     }
-    // Merge LHS/RHS.
+    // Merge LHS/RHS
     LHS = std::make_unique<BinaryExprAST>(BinOp, std::move(LHS), std::move(RHS));
   }
 }
@@ -280,6 +286,101 @@ static std::unique_ptr<ExprAST> ParseExpression() {
   return ParseBinOpRHS(0, std::move(LHS));
 }
 
+/// prototype
+static std::unique_ptr<PrototypeAST> ParsePrototype() {
+  if (CurTok != tok_identifier)
+    return LogErrorP("Expected function name in prototype");
+
+  std::string FnName = IdentifierStr;
+  getNextToken();
+
+  if (CurTok != '(')
+    return LogErrorP("Expected '(' in prototype");
+
+  std::vector<std::string> ArgNames;
+  while (getNextToken() == tok_identifier)
+    ArgNames.push_back(IdentifierStr);
+
+  if (CurTok != ')')
+    return LogErrorP("Expected ')' in prototype");
+
+  getNextToken();
+  return std::make_unique<PrototypeAST>(FnName, std::move(ArgNames));
+}
+
+/// definition ::= 'def' prototype expression
+static std::unique_ptr<FunctionAST> ParseDefineition() {
+  getNextToken();
+  auto Proto = ParsePrototype();
+  if (!Proto)
+    return nullptr;
+
+  if (auto E = ParseExpression())
+    return std::make_unique<FunctionAST>(std::move(Proto), std::move(E));
+  return nullptr;
+}
+
+/// external ::= 'extern' prototype
+static std::unique_ptr<PrototypeAST>ParseExtern() {
+  getNextToken();
+  return ParsePrototype();
+}
+
+/// toplevelexpr ::= expression
+static std::unique_ptr<FunctionAST> ParseTopLevelExpr() {
+  if (auto E = ParseExpression()) {
+    auto Proto = std::make_unique<PrototypeAST>("", std::vector<std::string>());
+    return std::make_unique<FunctionAST>(std::move(Proto), std::move(E));
+  }
+  return nullptr;
+}
+
+static void HandleDefinition() {
+  if (ParseDefineition()) {
+    fprintf(stderr, "Parsed a function definition\n");
+  } else {
+    getNextToken();
+  }
+}
+
+static void HandleExtern() {
+  if (ParseExtern()) {
+    fprintf(stderr, "Parse an extern\n");
+  } else {
+    getNextToken();
+  }
+}
+
+static void HandleTopLevelExpression() {
+  if (ParseTopLevelExpr()) {
+    fprintf(stderr, "Parse a top-level expr\n");
+  } else {
+    getNextToken();
+  }
+}
+
+static void MainLoop() {
+  while (true) {
+    fprintf(stderr, "ready> ");
+    switch (CurTok) {
+      case tok_eof:
+        return;
+      case ';':
+        getNextToken();
+        break;
+      case tok_def:
+        HandleDefinition();
+        break;
+      case tok_extern:
+        HandleExtern();
+        break;
+      default:
+        HandleTopLevelExpression();
+        break;
+    }
+  }
+}
+
 int main() {
   // Install standard binary operators
   // 1 is lowest precedence
@@ -291,4 +392,10 @@ int main() {
   BinopPrecedence['*'] = 40;
   BinopPrecedence['/'] = 40;
   // maybe have '.' can be highest?
+
+  fprintf(stderr, "ready> ");
+  getNextToken();
+
+  MainLoop();
+  return 0;
 }
